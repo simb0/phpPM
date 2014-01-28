@@ -7,6 +7,7 @@ phpPM based on threads. Each new message starts a thread in which the conversati
 
 Features:
 - Uses PDO
+- Uuses prepare statements -> SQL-Injection safe
 - Each user has a MessageBox
 - Delete messages(not physically)
   - Delete the thread too if the thread has no messages
