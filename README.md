@@ -9,6 +9,6 @@ Features:
 - Uses PDO
 - Each user has a MessageBox
 - Delete messages(not physically)
-  - Deletes the thread too if the thread has no messages
+  - Delete the thread too if the thread has no messages
 - Delete threads(not physically)
 
