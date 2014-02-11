@@ -20,11 +20,8 @@ How to use
 After you have configure phpPM(see https://github.com/simb0/phpPM/wiki) you can use it as follow.
 
 Get the MessageBox for your user: 
-
 $userId is just the unique id for the user in your application
-
 $pdo here you can provide your database pdo object. You can also provide null to force phpPM to use your configuration
-
 $msgBox = new MSGBox($userId,$pdo); 
 
 Let's send a new message to another user:
