@@ -14,3 +14,5 @@ Features:
 - Delete threads(not physically)
 - Provide all needed functions for a postbox...
 
+How to use
+==========
