@@ -34,6 +34,8 @@ class MSGBox
 	public static $DELETED_BY_TO_USER = 2;
 	public static $DELETED_BY_FROM_USER = 3;
 	public static $DELETED_BY_BOTH = 4;
+	public static $DELETED_FROM_USER_NOT_READED_BY_TO_USER = 5;
+	public static $DELETED_FROM_USER_READED_BY_TO_USER = 6;
 	
 	/**
 	 * @var pdo
@@ -259,12 +261,14 @@ class MSGBox
 			//check if msg id deleted, if one message is not deletet then the thread is not marked as deleted
 			if( !( ($message->getToUserId() == $this->userId && ($message->getStatus() == self::$DELETED_BY_TO_USER || 
 							$message->getStatus() == self::$DELETED_BY_BOTH) ) || 
-				($message->getFromUserId() == $this->userId && ($message->getStatus() == self::$DELETED_BY_FROM_USER || 
+					($message->getFromUserId() == $this->userId && $message->getStatus() == self::$DELETED_FROM_USER_NOT_READED_BY_TO_USER) ||
+					($message->getFromUserId() == $this->userId && $message->getStatus() == self::$DELETED_FROM_USER_READED_BY_TO_USER) ||
+					($message->getFromUserId() == $this->userId && ($message->getStatus() == self::$DELETED_BY_FROM_USER || 
 						$message->getStatus() == self::$DELETED_BY_BOTH) ) ) )			
 			{
 				$isDeleted = false;	
 			}
-			if($message->getToUserId() == $this->userId && $message->getStatus() == self::$NOT_READED)
+			if($message->getToUserId() == $this->userId && ($message->getStatus() == self::$NOT_READED || ($message->getToUserId() == $this->userId && $message->getStatus() == self::$DELETED_FROM_USER_NOT_READED_BY_TO_USER)) )
 			{
 				$hasNewMessages = true;
 			}
@@ -284,6 +288,8 @@ class MSGBox
 		$isDeleted = false;
 		if(($msg->getToUserId() == $this->userId && ($msg->getStatus() == self::$DELETED_BY_TO_USER ||
 				$msg->getStatus() == self::$DELETED_BY_BOTH) ) ||
+				($msg->getFromUserId() == $this->userId && $msg->getStatus() == self::$DELETED_FROM_USER_NOT_READED_BY_TO_USER) ||
+				($msg->getFromUserId() == $this->userId && $msg->getStatus() == self::$DELETED_FROM_USER_READED_BY_TO_USER) ||
 				($msg->getFromUserId() == $this->userId && ($msg->getStatus() == self::$DELETED_BY_FROM_USER ||
 						$msg->getStatus() == self::$DELETED_BY_BOTH) ) )
 		{
@@ -311,7 +317,7 @@ class MSGBox
 	public function getCountNotReadedMessages()
 	{
 		$sql = $this->getQuery('select count(*) from '.self::$SCHEMA.'.MSG INNER JOIN '.self::$SCHEMA.'.MSG_BOX ON"ID"="MSG_ID" WHERE 
-								"To_User_ID"='.$this->userId.' AND "Status"='.self::$NOT_READED);
+								"To_User_ID"='.$this->userId.' AND ("Status"='.self::$NOT_READED.' OR "Status"='.self::$DELETED_FROM_USER_NOT_READED_BY_TO_USER.')');
 		$stmt = $this->pdo->query($sql);
 		$row = $stmt->fetch();
 		return $row['count'];
@@ -332,11 +338,18 @@ class MSGBox
 	 */
 	public function setMsgReaded($msgId)
 	{
+		$MSG = $this->getMsg($msgId);
+		
 		if ($this->userId == $MSG->getToUserId())
 		{
-			$sql = $this->getQuery('UPDATE '.self::$SCHEMA.'.MSG_BOX SET "Status"=? WHERE "MSG_ID"=?');
+			$sql = $this->getQuery('UPDATE '.self::$SCHEMA.'.MSG_BOX SET "Status"= (
+																						CASE WHEN "Status" = '.self::$DELETED_FROM_USER_NOT_READED_BY_TO_USER.' THEN '.self::$DELETED_FROM_USER_READED_BY_TO_USER.'
+																						ELSE '.self::$READED.'
+																						END
+																					)
+																		WHERE "MSG_ID"=?');
 			$stmt = $this->pdo->prepare($sql);
-			$stmt->execute(array(self::$READED,$msgId)); 
+			$stmt->execute(array(self::$msgId)); 
 		}
 	}
 	
@@ -346,9 +359,14 @@ class MSGBox
 	 */
 	public function setAllMsgReadedInThread($threadId)
 	{
-		$sql = $this->getQuery('UPDATE '.self::$SCHEMA.'.MSG_BOX set "Status"=? WHERE "MSG_ID" in (Select "ID" from '.self::$SCHEMA.'.MSG where "Thread_ID"=?) and "To_User_ID"='.$this->userId);
+		$sql = $this->getQuery('UPDATE '.self::$SCHEMA.'.MSG_BOX set "Status"=(
+																					CASE WHEN "Status" = '.self::$DELETED_FROM_USER_NOT_READED_BY_TO_USER.' THEN '.self::$DELETED_FROM_USER_READED_BY_TO_USER.'
+																					ELSE '.self::$READED.'
+																					END
+																			  )
+								 WHERE "MSG_ID" in (Select "ID" from '.self::$SCHEMA.'.MSG where "Thread_ID"=?) and "To_User_ID"='.$this->userId);
 		$stmt = $this->pdo->prepare($sql);
-		$stmt->execute(array(self::$READED,$threadId));
+		$stmt->execute(array($threadId));
 	}
 	
 	/**
@@ -385,11 +403,32 @@ class MSGBox
 		$stmt->execute(array($msgId));
 	}
 	
+	/**
+	 * @method set all Threads to deleted
+	 */
+	public function truncateBox()
+	{
+		$sql = $this->getQuery('UPDATE '.self::$SCHEMA.'.MSG_BOX SET "Status"= (
+						CASE WHEN "Status"= '.self::$DELETED_BY_FROM_USER.' AND "To_User_ID"='.$this->userId.' THEN '.self::$DELETED_BY_BOTH.'
+							 WHEN "Status" = '.self::$DELETED_BY_TO_USER.' AND "From_User_ID"='.$this->userId.' THEN '.self::$DELETED_BY_BOTH.'
+							 WHEN "Status" = '.self::$DELETED_FROM_USER_NOT_READED_BY_TO_USER.' AND "To_User_ID"='.$this->userId.' THEN '.self::$DELETED_BY_BOTH.'
+							 WHEN "Status" = '.self::$DELETED_FROM_USER_READED_BY_TO_USER.' AND "To_User_ID"='.$this->userId.' THEN '.self::$DELETED_BY_BOTH.'
+							 WHEN "To_User_ID"='.$this->userId.' THEN '.self::$DELETED_BY_TO_USER.'
+							 WHEN "From_User_ID"='.$this->userId.' THEN '.self::$DELETED_BY_FROM_USER.'
+							 END
+					  )
+						 WHERE ("To_User_ID"='.$this->userId.' OR "From_User_ID"='.$this->userId.') AND "Status" != '.self::$DELETED_BY_BOTH);
+	
+		$stmt = $this->pdo->prepare($sql);
+		$stmt->execute();
+	}
+	
 	public function setAllMsgDeleteInThread($threadId)
 	{
 		$sql = $this->getQuery('UPDATE '.self::$SCHEMA.'.MSG_BOX set "Status"=(
 																CASE WHEN ( "To_User_ID" = '.$this->userId.' AND "Status" = '.self::$DELETED_BY_FROM_USER.') THEN '.self::$DELETED_BY_BOTH.'
 																	 WHEN ( "From_User_ID" = '.$this->userId.' AND "Status" = '.self::$DELETED_BY_TO_USER.') THEN '.self::$DELETED_BY_BOTH.'
+																	 WHEN "From_User_ID" = '.$this->userId.' AND "Status" = '.self::$NOT_READED.' THEN '.self::$DELETED_FROM_USER_NOT_READED_BY_TO_USER.'
 																	 WHEN "To_User_ID" = '.$this->userId.' THEN '.self::$DELETED_BY_TO_USER.'
 																	 WHEN "From_User_ID" = '.$this->userId.' THEN '.self::$DELETED_BY_FROM_USER.'
 																END )
